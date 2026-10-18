@@ -6,7 +6,11 @@ venv/
 build/
 dist/
 docs/
+tests/
 
 # Catatan & izin pribadi MABA Code (jangan di-commit)
 .maba/settings.local.json
 MABA.local.md
+
+# Konfigurasi lokal Claude Code (izin, hooks, sesi)
+.claude/
