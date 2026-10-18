@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "maba-code"
+version = "0.3.0"
+description = "MABA Code - asisten coding agentik di terminal (Strands Agents + Amazon Bedrock, inti GPT-6 Luna)"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "strands-agents>=1.54",
+    "boto3>=1.40",
+    "rich>=13.7",
+    "prompt_toolkit>=3.0.43",
+]
+
+[project.scripts]
+maba = "maba_code.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["maba_code*"]

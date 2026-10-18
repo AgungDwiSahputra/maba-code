@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+build/
+dist/
+docs/
+
+# Catatan & izin pribadi MABA Code (jangan di-commit)
+.maba/settings.local.json
+MABA.local.md
