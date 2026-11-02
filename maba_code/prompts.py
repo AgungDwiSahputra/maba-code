@@ -9,6 +9,7 @@ import subprocess
 from pathlib import Path
 
 from maba_code import __version__
+from maba_code.config import provider_label
 from maba_code.shell import IS_WINDOWS, shell_name
 
 BASE_PROMPT = """\
@@ -135,7 +136,7 @@ def environment_block(cwd: Path, model: str) -> str:
         f"- Platform: {platform.system()} {platform.release()}",
         f"- Shell for run_command: {shell_name()}",
         f"- Date: {_dt.date.today().isoformat()}",
-        f"- Model: {model} (via Amazon Bedrock) · MABA Code {__version__}",
+        f"- Model: {model} (via {provider_label(model)}) · MABA Code {__version__}",
     ]
     branch = _git_branch(cwd)
     if branch:

@@ -16,7 +16,10 @@ from rich.table import Table
 from rich.text import Text
 
 from maba_code import __version__
-from maba_code.config import AUTO_COMPACT_PCT, CORE_MODEL, MODE_LABELS, MODEL_ALIASES, MODES, maba_home
+from maba_code.config import (
+    AUTO_COMPACT_PCT, CORE_MODEL, EFFORT_LABELS, EFFORT_LEVELS, MODE_LABELS, MODEL_ALIASES, MODES, is_anthropic_api,
+    maba_home, provider_label,
+)
 from maba_code.memory import list_auto_memory, load_memory
 from maba_code.models import make_session
 from maba_code.prompts import INIT_PROMPT
@@ -67,7 +70,7 @@ def _table(*columns: str) -> Table:
 # Pengelompokan /help. Perintah bawaan yang belum terdaftar di sini otomatis masuk "Lainnya".
 HELP_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Percakapan", ("clear", "resume", "compact", "undo", "todo", "exit")),
-    ("Model & izin", ("model", "mode", "plan", "permissions", "tools")),
+    ("Model & izin", ("model", "effort", "mode", "plan", "permissions", "tools")),
     ("Proyek & ekstensi", ("init", "memory", "agents", "skills", "mcp", "tasks", "loop")),
     ("Info & diagnosis", ("status", "cost", "config", "doctor", "help")),
 )
@@ -121,7 +124,8 @@ async def cmd_status(app: ChatApp, args: str) -> None:
     mode = app.policy.mode
     grid.add_row("keadaan", Text(f"{sym.ok} menunggu perintah Anda (agen tidak sedang bekerja)", style="green"))
     grid.add_row("mode", Text(MODE_HINT.get(mode, mode), style=MODE_STYLE.get(mode, "")))
-    grid.add_row("model", f"{app.settings.model}  [dim](sub-agen & kompaksi: {CORE_MODEL})[/dim]")
+    effort = f" · effort {app.settings.effort}" if is_anthropic_api(app.settings.model) else ""
+    grid.add_row("model", f"{app.settings.model}{effort}  [dim](sub-agen & kompaksi: {CORE_MODEL})[/dim]")
     grid.add_row("folder", str(app.ws.cwd))
     grid.add_row("sesi", f"{app.session_id}  [dim]({len(app.agent.messages)} pesan)[/dim]")
     pct = app.last_ctx_pct
@@ -161,18 +165,56 @@ async def cmd_model(app: ChatApp, args: str) -> None:
     out = app.ui.chrome
     if args.strip():
         model = app.set_model(args.strip())
-        app.ui.notice(f"Model agen utama diganti ke {model}. Jalankan /doctor untuk menguji koneksinya.", "green")
+        app.ui.notice(f"Model agen utama diganti ke {model} ({provider_label(model)}). Jalankan /doctor untuk menguji koneksinya.", "green")
+        if is_anthropic_api(model):
+            from maba_code.anthropic_api import CREDENTIAL_ENV, has_credentials
+
+            if not has_credentials():
+                app.ui.notice(
+                    f"{CREDENTIAL_ENV[0]} belum terdeteksi di environment: permintaan ke Claude API akan gagal sampai kunci diset.",
+                    "yellow",
+                )
         if model != CORE_MODEL:
             app.ui.notice(f"Sub-agen, skill fork, web_fetch & kompaksi tetap memakai model inti {CORE_MODEL}.", "dim")
         return
-    table = _table("Alias", "Model ID (Bedrock)")
+    table = _table("Alias", "Model ID", "Jalur")
     for alias, model_id in MODEL_ALIASES.items():
         marker = "[green]●[/green] " if model_id == app.settings.model else "  "
-        table.add_row(f"{marker}{alias}", model_id)
-    out.print(f"Model agen utama: [bold]{app.settings.model}[/bold]  (profile: {app.settings.profile})")
+        table.add_row(f"{marker}{alias}", model_id, "Claude API" if is_anthropic_api(model_id) else "Bedrock")
+    out.print(f"Model agen utama: [bold]{app.settings.model}[/bold]  ({provider_label(app.settings.model)}, profile AWS: {app.settings.profile})")
     out.print(f"Model inti (sub-agen, skill fork, web_fetch, kompaksi): [bold]{CORE_MODEL}[/bold] — tidak berubah oleh /model")
     out.print(table)
-    out.print("[dim]Pakai: /model <alias|model-id>. ID polos tanpa 'global.' sering ditolak Bedrock.[/dim]")
+    out.print(
+        "[dim]Pakai: /model <alias|model-id>. ID polos tanpa 'global.' sering ditolak Bedrock. "
+        "Awalan 'anthropic/' = Claude API langsung (butuh env ANTHROPIC_API_KEY).[/dim]"
+    )
+
+
+async def cmd_effort(app: ChatApp, args: str) -> None:
+    out = app.ui.chrome
+    s = app.settings
+    on_api = is_anthropic_api(s.model)
+    wanted = args.strip().lower()
+    if not wanted:
+        for level in EFFORT_LEVELS:
+            marker = "●" if level == s.effort else " "
+            out.print(f" {marker} [bold]{level:<7}[/bold] {EFFORT_LABELS[level]}")
+        out.print("[dim]Pakai: /effort <level>. Berlaku untuk sesi ini; permanen lewat settings 'effort'.[/dim]")
+        if not on_api:
+            out.print(f"[dim]Model sekarang {s.model} (Bedrock): effort baru dipakai saat Anda memilih model api-*.[/dim]")
+        return
+    if wanted not in EFFORT_LEVELS:
+        app.ui.notice(f"Effort tidak dikenal: {wanted}. Pilihan: {', '.join(EFFORT_LEVELS)}", "red")
+        return
+    app.set_effort(wanted)
+    if on_api:
+        app.ui.notice(f"Effort: {wanted} — {EFFORT_LABELS[wanted]}. Berlaku mulai permintaan berikutnya.", "green")
+        app.ui.notice("Cache prompt Claude API dimulai ulang sekali karena parameter permintaan berubah.", "dim")
+    else:
+        app.ui.notice(
+            f"Effort disimpan ({wanted}), tetapi model sekarang lewat Bedrock: baru berlaku saat memakai model api-*.",
+            "yellow",
+        )
 
 
 async def cmd_mode(app: ChatApp, args: str) -> None:
@@ -414,14 +456,15 @@ async def cmd_config(app: ChatApp, args: str) -> None:
     for key, value in (
         ("profile AWS", s.profile),
         ("region", s.region or "(dari profile)"),
-        ("model agen utama", s.model),
+        ("model agen utama", f"{s.model} ({provider_label(s.model)})"),
         ("model inti (dikunci)", CORE_MODEL),
+        ("effort (Claude API)", f"{s.effort} (ubah via /effort atau settings 'effort')"),
         ("mode", app.policy.mode),
         ("hooks", ", ".join(sorted(app.hooks.groups)) or "(tidak ada)"),
         ("server MCP", ", ".join(c.name for c in app.mcp.configs) or "(tidak ada)"),
         ("memori otomatis", str(app.ws.memory_dir) if app.ws.memory_dir else "nonaktif"),
         ("context window", f"{s.context_window:,} token (asumsi; ubah via settings 'contextWindow')"),
-        ("max output token", f"{s.max_tokens:,}"),
+        ("max output token", f"{s.output_tokens():,}" + ("" if s.max_tokens else " (default jalur model)")),
         ("batas giliran/perintah", s.max_turns),
         ("folder kerja", app.ws.cwd),
         ("folder sesi", app.session_dir),
@@ -429,11 +472,11 @@ async def cmd_config(app: ChatApp, args: str) -> None:
     ):
         table.add_row(key, str(value))
     app.ui.chrome.print(table)
-    app.ui.chrome.print("[dim]Kredensial AWS tidak pernah ditampilkan atau disimpan oleh MABA Code.[/dim]")
+    app.ui.chrome.print("[dim]Kredensial AWS & API key Anthropic tidak pernah ditampilkan atau disimpan oleh MABA Code.[/dim]")
 
 
 async def run_doctor(app: ChatApp) -> bool:
-    """Uji profile → kredensial → STS → model Bedrock. Tidak pernah mencetak kunci."""
+    """Uji profile → kredensial → STS → model Bedrock (+ Claude API bila dipakai). Tidak pernah mencetak kunci."""
     from botocore.exceptions import ProfileNotFound
 
     out = app.ui.chrome
@@ -469,6 +512,9 @@ async def run_doctor(app: ChatApp) -> bool:
     # Model inti GPT-6 Luna selalu diuji: sub-agen/kompaksi/web_fetch memakainya walau agen utama diganti.
     for model_id in dict.fromkeys([s.model, CORE_MODEL]):
         label = f"Model {model_id}" + (" (inti)" if model_id == CORE_MODEL else "")
+        if is_anthropic_api(model_id):
+            await _doctor_anthropic(model_id, label, line)
+            continue
         try:
             started = time.monotonic()
             await asyncio.to_thread(
@@ -486,6 +532,26 @@ async def run_doctor(app: ChatApp) -> bool:
     return ok_all
 
 
+async def _doctor_anthropic(model_id: str, label: str, line: Callable[..., None]) -> None:
+    """Uji jalur Claude API: paket SDK → kunci di env (nilainya tidak dibaca) → satu panggilan kecil."""
+    try:
+        from maba_code.anthropic_api import CREDENTIAL_ENV, has_credentials, ping
+    except ModuleNotFoundError:
+        line(False, "Paket `anthropic` belum terpasang", 'pip install "strands-agents[anthropic]"')
+        return
+    if has_credentials():
+        line(True, "API key Anthropic terdeteksi di environment", "nilai tidak ditampilkan")
+    else:
+        line(False, f"{CREDENTIAL_ENV[0]} belum diset", "lihat README bagian 'Koneksi Claude API'")
+        return
+    try:
+        started = time.monotonic()
+        stop = await ping(model_id)
+        line(True, f"{label} merespons lewat Claude API", f"{time.monotonic() - started:.1f}s · stop_reason {stop}")
+    except Exception as exc:  # noqa: BLE001
+        line(False, f"{label} gagal dipanggil lewat Claude API", f"{type(exc).__name__}: {str(exc)[:160]}")
+
+
 async def cmd_doctor(app: ChatApp, args: str) -> None:
     await run_doctor(app)
 
@@ -493,7 +559,8 @@ async def cmd_doctor(app: ChatApp, args: str) -> None:
 BUILTINS: tuple[Command, ...] = (
     Command("help", "Tampilkan bantuan", cmd_help, ("?",)),
     Command("clear", "Mulai percakapan baru", cmd_clear, ("new",)),
-    Command("model", "Lihat/ganti model Bedrock", cmd_model),
+    Command("model", "Lihat/ganti model (Bedrock atau Claude API)", cmd_model),
+    Command("effort", "Lihat/ganti kedalaman berpikir model Claude API", cmd_effort),
     Command("mode", "Lihat/ganti mode izin", cmd_mode),
     Command("plan", "Masuk mode rencana (opsional: langsung beri tugas)", cmd_plan),
     Command("compact", "Ringkas percakapan (opsional: fokus ringkasan)", cmd_compact),

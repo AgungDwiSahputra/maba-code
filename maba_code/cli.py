@@ -12,7 +12,7 @@ from pathlib import Path
 from rich.console import Console
 
 from maba_code import __version__
-from maba_code.config import DEFAULT_MODEL, DEFAULT_PROFILE, MODES, load_settings
+from maba_code.config import DEFAULT_MODEL, DEFAULT_PROFILE, EFFORT_LEVELS, MODES, load_settings
 
 
 def configure_stdio() -> None:
@@ -47,6 +47,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--model", help=f"Model ID atau alias (default: {DEFAULT_MODEL})")
     p.add_argument("--region", help="Override region AWS (default: region profile)")
     p.add_argument("--mode", choices=MODES, help="Mode izin awal")
+    p.add_argument("--effort", choices=EFFORT_LEVELS, help="Kedalaman berpikir model Claude API (default: settings atau medium)")
     p.add_argument("--max-turns", type=int, help="Batas giliran model per perintah")
     p.add_argument("-c", "--continue", dest="continue_", action="store_true", help="Lanjutkan sesi terakhir di folder ini")
     p.add_argument("--resume", metavar="ID", help="Lanjutkan sesi tertentu")
@@ -72,7 +73,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Folder tidak ditemukan: {cwd}", file=sys.stderr)
         return 2
     settings = load_settings(
-        cwd, {"profile": args.profile, "model": args.model, "region": args.region, "mode": args.mode, "max_turns": args.max_turns}
+        cwd,
+        {"profile": args.profile, "model": args.model, "region": args.region, "mode": args.mode, "max_turns": args.max_turns,
+         "effort": args.effort},
     )
 
     prompt = " ".join(args.prompt).strip()

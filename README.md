@@ -11,8 +11,11 @@ dokumentasi publik; lihat [`docs/REA-LAPORAN.md`](docs/REA-LAPORAN.md) untuk buk
   memori otomatis, dan `web_fetch`. Semuanya ditegakkan oleh harness yang sama (izin deny → ask → allow).
 - **Antarmuka (v0.3):** status kerja agen real-time, dialog izin yang menjelaskan dampak, ringkasan akhir giliran,
   toolbar adaptif, `/status`, dan pratinjau UI tanpa model (lihat [Pengalaman pemakaian](#pengalaman-pemakaian)).
+- **Claude API langsung (v0.4):** agen utama bisa memakai model Claude lewat API key Anthropic Anda sendiri
+  (`/model api-opus`), tanpa Bedrock. Lihat [Koneksi Claude API](#koneksi-claude-api-anthropic).
 - **Kredensial tersembunyi:** memakai profile AWS lokal `agung` (`--profile agung` adalah default). Kunci tidak
-  pernah dibaca, ditulis, atau ditampilkan oleh MABA Code; boto3 memuatnya sendiri dari profile.
+  pernah dibaca, ditulis, atau ditampilkan oleh MABA Code; boto3 memuatnya sendiri dari profile, dan SDK
+  `anthropic` membaca API key dari env `ANTHROPIC_API_KEY`.
 
 ## Mulai cepat
 
@@ -26,7 +29,7 @@ cd D:\proyek\saya                    # masuk ke proyek yang ingin dikerjakan
 ```
 
 Opsional: `pip install -e .` di folder MABA agar perintah `maba` tersedia global.
-Dependensi: `strands-agents`, `boto3`, `rich`, `prompt_toolkit` (semua sudah terpasang di mesin ini).
+Dependensi: `strands-agents[anthropic]` (menarik SDK `anthropic`), `boto3`, `rich`, `prompt_toolkit`.
 
 ## Pengalaman pemakaian
 
@@ -82,7 +85,7 @@ Lihat semua tampilan tanpa memanggil model (tanpa biaya): `python -m maba_code.u
 
 ### Perintah slash
 
-`/help` `/clear` `/model [alias]` `/mode [nama]` `/plan [tugas]` `/compact [fokus]` `/resume [no|id]` `/todo` `/undo`
+`/help` `/clear` `/model [alias]` `/effort [level]` `/mode [nama]` `/plan [tugas]` `/compact [fokus]` `/resume [no|id]` `/todo` `/undo`
 `/status` `/cost` `/init` `/memory` `/tools` `/permissions` `/config` `/doctor` `/exit`
 `/agents` `/skills` `/tasks [stop id]` `/loop [interval] <prompt>` `/mcp`
 
@@ -92,9 +95,50 @@ perintah kustom bernama sama).
 
 ### Alias model
 
-`luna` (default, inti) · `sol` · `astra` · `sonnet` · `opus` · `haiku` · `fable` · `kimi` · `glm` · `grok`,
-atau ID Bedrock lengkap. Model OpenAI di Bedrock **wajib** lewat inference profile (`global.…`).
+| Alias | Model ID | Jalur |
+|---|---|---|
+| `gpt-6-luna` (default, inti) | `global.openai.gpt-6-luna` | Bedrock |
+| `api-opus` | `anthropic/claude-opus-5-5` | Claude API |
+| `api-sonnet` | `anthropic/claude-sonnet-5-5` | Claude API |
+| `api-haiku` | `anthropic/claude-haiku-5-5` | Claude API |
+| `nova-2-lite` (juga `nova 2 lite`) | `global.amazon.nova-2-lite-v1:0` | Bedrock |
+
+Model lain tetap bisa dipakai dengan ID lengkap: ID Bedrock (`global.…`; model OpenAI di Bedrock **wajib** lewat
+inference profile) atau `anthropic/<model-id>` untuk Claude API (butuh `ANTHROPIC_API_KEY`).
 `/model` hanya mengganti **agen utama**; semua agen anak tetap GPT-6 Luna. `--doctor` selalu ikut menguji Luna.
+
+### Koneksi Claude API (Anthropic)
+
+1. **Simpan API key di environment pengguna**, bukan di file proyek atau settings (jangan tempel kunci ke chat):
+
+   ```powershell
+   setx ANTHROPIC_API_KEY "sk-ant-..."      # lalu TUTUP dan buka ulang terminal
+   ```
+
+2. **Uji koneksinya** (satu panggilan kecil berbiaya sangat rendah, kunci tidak pernah dicetak):
+
+   ```powershell
+   python -m maba_code --model api-opus --doctor
+   ```
+
+3. **Pakai:** `maba --model api-opus`, atau `/model api-opus` di tengah sesi. Agar permanen, isi
+   `~/.maba/settings.json` dengan `{"model": "api-opus"}`.
+
+Yang perlu diketahui:
+
+- Hanya **agen utama** yang pindah ke Claude API. Sub-agen, skill `fork`, `web_fetch`, dan kompaksi tetap GPT-6
+  Luna di Bedrock, jadi profile AWS tetap diperlukan.
+- `effort` (`low` · `medium` · `high` · `xhigh` · `max`, default `medium`) mengatur kedalaman berpikir model, yang
+  memengaruhi biaya dan kecepatan. Ganti di tengah sesi dengan `/effort high` (tanpa argumen: daftar level), sekali
+  jalan dengan `--effort high`, atau permanen di settings: `{"effort": "high"}`. Mengganti effort membuat cache
+  prompt dimulai ulang sekali; riwayat percakapan tidak berubah. Pada model Bedrock nilainya disimpan saja.
+- Model Claude terbaru selalu berpikir sebelum menjawab, dan token pikiran ikut dihitung. Karena itu batas keluaran
+  default jalur ini 64.000 token (Bedrock tetap 8.192), kecuali Anda menyetel `maxTokens`.
+- Otomatis aktif: *prompt caching* (riwayat yang dikirim ulang ditagih jauh lebih murah); `drop_block` untuk blok
+  thinking yang tidak lagi cocok setelah kompaksi atau perubahan system prompt (tanpa ini akun Anthropic baru
+  mendapat error 400); serta *fallback* sisi server: bila pengaman Anthropic menolak permintaan, API mencoba model
+  cadangan (Opus/Sonnet/Fable; tidak untuk Haiku).
+- Biaya Claude API ditagih ke akun Anthropic pemilik API key, terpisah dari tagihan AWS.
 
 ## Izin & keamanan
 
@@ -124,7 +168,7 @@ Aturan evaluasi: **deny → ask → allow**; allow tidak bisa membatalkan deny. 
 ```json
 {
   "profile": "agung",
-  "model": "luna",
+  "model": "gpt-6-luna",
   "contextWindow": 256000,
   "permissions": {
     "allow": ["run_command(dotnet build*)", "run_command(npm test*)", "web_fetch(domain:*.python.org)", "mcp__github__*"],
@@ -279,7 +323,7 @@ diubah agen pada giliran terakhir (perubahan lewat `run_command` tidak dilacak).
 
 ## Opsi CLI
 
-`-p/--print` · `--profile` · `--model` · `--region` · `--mode` · `--max-turns` · `-c/--continue` · `--resume ID` ·
+`-p/--print` · `--profile` · `--model` · `--region` · `--mode` · `--effort` · `--max-turns` · `-c/--continue` · `--resume ID` ·
 `--cwd` · `--doctor` · `--version`. Tanpa terminal (mis. `echo "..." | maba`) otomatis memakai mode `-p`.
 Env: `MABA_PROFILE`, `MABA_MODEL`, `MABA_REGION`, `MABA_MODE`, `MABA_HOME`, `MABA_ASCII=1`, `MABA_DEBUG=1` (log ke `~/.maba/debug.log`).
 
@@ -304,6 +348,7 @@ Tampil di banner, `--version`, `--doctor`, dan User-Agent `web_fetch`. Setelah m
 
 | Versi | Isi |
 |---|---|
+| **0.4.0** | **Koneksi Claude API langsung.** Model berawalan `anthropic/` (alias `api-opus`, `api-sonnet`, `api-haiku`) dipanggil ke Claude API dengan `ANTHROPIC_API_KEY`; daftar `/model` diringkas menjadi `gpt-6-luna`, `api-opus`, `api-sonnet`, `api-haiku`, dan `nova-2-lite` (Amazon Nova 2 Lite, baru); alias lama (`luna`, `sol`, `astra`, `sonnet`, `opus`, `haiku`, `fable`, `kimi`, `glm`, `grok`) dihapus, modelnya tetap bisa dipakai lewat ID lengkap; effort lewat `/effort`, `--effort`, atau setting `effort`; batas keluaran 64K untuk jalur ini; prompt caching, `drop_block` untuk preserved thinking, dan fallback sisi server; `--doctor`/`/model`/`/config` mengenali jalur ini; pesan error Anthropic yang ramah; `ANTHROPIC_AUTH_TOKEN` ikut disaring dari shell agen. Dependensi kini `strands-agents[anthropic]`. **Perubahan perilaku:** `maxTokens` tanpa nilai berarti default per jalur model. |
 | **0.3.0** | **Antarmuka yang menjelaskan diri.** Baris status berisi tahap, langkah, dan waktu; sub-agen terlihat; dialog izin berlencana (TULIS/BERBAHAYA/INTERNET/MCP) dengan dampak dan kutipan agen; ringkasan akhir giliran (file diubah, perintah, aksi ditolak, token, konteks, langkah berikutnya); pesan berikon per level; toolbar adaptif dengan meter konteks dan petunjuk sesuai menu; placeholder input; banner adaptif dengan catatan kesiapan; `/help` berkelompok; `/status`; pengumuman kompaksi otomatis; peringatan mendekati batas giliran; `python -m maba_code.ui.preview`. **Perubahan perilaku:** Enter tidak lagi menyetujui dialog berbahaya/internet/MCP (harus `y`). |
 | 0.2.0 | Kemampuan agentik: hooks, sub-agen dari file, skills, klien MCP, task latar belakang, `/loop`, memori otomatis, `web_fetch`. |
 | 0.1.0 | Agen terminal dasar: tool file/shell, izin deny → ask → allow, sesi, kompaksi, mode izin. |

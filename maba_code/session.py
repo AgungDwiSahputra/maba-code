@@ -27,7 +27,10 @@ from strands.hooks import BeforeModelCallEvent, HookProvider, HookRegistry
 from strands.session.file_session_manager import FileSessionManager
 
 from maba_code.agents import AgentDef, load_agents, render_agents
-from maba_code.config import AUTO_COMPACT_PCT, CORE_MODEL, MODES, Settings, maba_home, project_key, resolve_model
+from maba_code.config import (
+    AUTO_COMPACT_PCT, CORE_MODEL, MODES, Settings, is_anthropic_api, maba_home, project_key, provider_label,
+    resolve_model,
+)
 from maba_code.hooks import STOP_HOOK_CAP, HookRunner
 from maba_code.mcp_support import McpManager
 from maba_code.memory import auto_memory_dir, load_auto_memory, load_memory, render_memory
@@ -602,7 +605,10 @@ class ChatApp:
             if name:
                 ui.set_phase("prepare", f"langkah berikutnya ({TOOL_LABELS.get(name, name)})")
         elif "event_loop_throttled_delay" in event:
-            ui.notice(f"Bedrock membatasi laju; mencoba lagi dalam {event['event_loop_throttled_delay']}s…", "yellow")
+            ui.notice(
+                f"{provider_label(self.settings.model)} membatasi laju; mencoba lagi dalam {event['event_loop_throttled_delay']}s…",
+                "yellow",
+            )
 
     async def _stream_once(self, prompt: Any, stats: TurnStats, detail: str = "memahami permintaan Anda") -> Any:
         """Satu putaran stream_async. Mengisi stats.error/stop_reason/ctx_pct dan mengembalikan AgentResult."""
@@ -632,6 +638,12 @@ class ChatApp:
             except Exception:  # noqa: BLE001
                 pass
         stats.stop_reason = str(getattr(result, "stop_reason", "")) if result is not None else ""
+        if stats.stop_reason == "refusal":
+            # Pengaman Claude API menolak (HTTP 200, bukan error); model cadangan pun ikut menolak bila ada.
+            ui.notice(
+                "Model menolak permintaan ini (pengaman Anthropic). Ubah kalimat permintaan, atau ganti model dengan /model.",
+                "yellow",
+            )
         if result is not None:
             ctx = getattr(result, "context_size", None)
             if ctx:
@@ -747,6 +759,14 @@ class ChatApp:
         self.agent.model = self.model
         self.agent.system_prompt = self._system_prompt()
         return self.settings.model
+
+    def set_effort(self, level: str) -> None:
+        """Ganti effort agen utama. Hanya model Claude API yang memakainya; modelnya dibangun ulang dengan parameter
+        baru (riwayat percakapan tidak tersentuh). Untuk model Bedrock nilainya disimpan untuk dipakai nanti."""
+        self.settings.effort = level
+        if is_anthropic_api(self.settings.model):
+            self.model = self.model_factory(self.settings)
+            self.agent.model = self.model
 
     # --------------------------------------------------------------- sesi
     def _meta_path(self, session_id: str) -> Path:

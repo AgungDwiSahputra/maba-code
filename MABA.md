@@ -1,7 +1,7 @@
 # MABA Code — catatan untuk agen
 
-Asisten coding agentik di terminal: Strands Agents + Amazon Bedrock, mesin inti GPT-6 Luna. Python ≥ 3.10,
-dikembangkan di Windows.
+Asisten coding agentik di terminal: Strands Agents + Amazon Bedrock (agen utama opsional lewat Claude API langsung),
+mesin inti GPT-6 Luna. Python ≥ 3.10, dikembangkan di Windows.
 
 ## Perintah
 - Tes (offline, tanpa jaringan): `python -m unittest discover -s tests -t .`
@@ -9,7 +9,7 @@ dikembangkan di Windows.
 - Tes nyata ke Bedrock hanya lewat `--doctor` atau `-p "..."` (memakai profile `agung`, biaya kecil).
 
 ## Versi & catatan rilis
-- Versi sekarang **0.3.0**. Naikkan di `maba_code/__init__.py` **dan** `pyproject.toml` (dijaga `VersionTests`), lalu catat
+- Versi sekarang **0.4.0**. Naikkan di `maba_code/__init__.py` **dan** `pyproject.toml` (dijaga `VersionTests`), lalu catat
   di tabel "Riwayat versi" pada README. Semua tampilan versi (banner, `--version`, `--doctor`, User-Agent) membaca
   `__version__`; `maba_code.egg-info/` hasil `pip install -e .` bisa usang, abaikan atau pasang ulang.
 - Pra-1.0: fitur/perubahan perilaku = naik minor, perbaikan = naik patch. `docs/REA-LAPORAN.md` adalah bukti historis v0.2:
@@ -24,9 +24,15 @@ dikembangkan di Windows.
 - `tasks.py` task latar belakang; `web.py` fetch + pagar SSRF; `mcp_support.py` klien MCP + trust store.
 - `ui/` rich + prompt_toolkit (`activity.py` status kerja agen & ringkasan giliran, `theme.py` simbol/label/level,
   `preview.py` pratinjau tanpa model); `commands.py` slash command; `config.py` settings berlapis + `CORE_MODEL`.
+- `models.py` `build_model` memilih jalur: ID `anthropic/…` → `anthropic_api.py` (`MabaAnthropicModel`, subclass
+  `AnthropicModel` Strands, diimpor malas), selain itu `BedrockModel`. Tes jalur ini: `tests/test_anthropic_api.py`
+  (HTTP dicegat `httpx.MockTransport`, tanpa kunci/biaya).
 
 ## Aturan penting
-- Jangan pernah mencetak/menyimpan kredensial AWS; profile dibaca boto3 saja.
+- Jangan pernah mencetak/menyimpan kredensial AWS; profile dibaca boto3 saja. API key Anthropic hanya dari env
+  (`ANTHROPIC_API_KEY`), dibaca SDK `anthropic`; jangan tambahkan kunci settings untuknya.
+- Jalur Claude API: jangan kirim `thinking` disabled/`budget_tokens` (400 di Opus 5.5) dan jangan buang
+  `block_binding: drop_block` selama kompaksi masih menyisakan ekor percakapan (akun baru akan kena 400).
 - **Mesin inti GPT-6 Luna (`CORE_MODEL = global.openai.gpt-6-luna`) tidak boleh diganti.** Setiap fitur ber-model
   selain agen utama WAJIB dibuat lewat `ChatApp._sub_agent()` (memakai `core_model`) atau `self.summarizer`; jangan
   pernah membuat `Agent(model=...)` sendiri atau memakai `self.model` untuk agen anak. `LunaPinTests` menjaganya.
@@ -58,3 +64,5 @@ dikembangkan di Windows.
 - Tampilan TTY interaktif (placeholder, toolbar adaptif, keterangan sesaat Shift+Tab, spinner bersama `EscWatcher`/type-ahead
   di konsol Windows) hanya diuji lewat pipe input, console rekam, dan `ui.preview`.
 - Kompaksi otomatis proaktif di 75% (hanya `reduce_context` yang diuji langsung) dan mode `-p` terhadap Bedrock.
+- Jalur Claude API baru diuji dengan server palsu: panggilan nyata (`--model api-opus --doctor`), bentuk asli blok
+  `fallback` di stream, dan kompaksi oleh Luna atas riwayat yang berisi blok thinking Anthropic belum dicoba.
