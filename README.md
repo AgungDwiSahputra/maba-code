@@ -1,99 +1,116 @@
 # MABA Code
 
-Asisten coding agentik di terminal — dibangun di atas **[Strands Agents](https://strandsagents.com/)** dan model
-**Amazon Bedrock**. Alur kerjanya terinspirasi Claude Code (dipelajari lewat analisis clean-room dari
-dokumentasi publik; lihat [`docs/REA-LAPORAN.md`](docs/REA-LAPORAN.md) untuk buktinya).
+Asisten coding agentik di terminal, dibangun di atas **[Strands Agents](https://strandsagents.com/)** dengan model
+dari **Amazon Bedrock** atau **Claude API**. Alur kerjanya terinspirasi Claude Code (analisis clean-room dari
+dokumentasi publik; bukti di `docs/REA-LAPORAN.md`, salinan lokal).
 
-- **Mesin inti: GPT-6 Luna** (`global.openai.gpt-6-luna`, konstanta `CORE_MODEL`). Agen utama memakainya secara
-  default (bisa diganti dengan `--model`/`/model`), tetapi **sub-agen, skill `context: fork`, `web_fetch`, dan
-  kompaksi selalu dikunci ke GPT-6 Luna**, apa pun pilihan `/model`.
-- **Kemampuan agentik (v0.2):** hooks, sub-agen dari file, skills, klien MCP, task shell latar belakang, `/loop`,
-  memori otomatis, dan `web_fetch`. Semuanya ditegakkan oleh harness yang sama (izin deny → ask → allow).
-- **Antarmuka (v0.3):** status kerja agen real-time, dialog izin yang menjelaskan dampak, ringkasan akhir giliran,
-  toolbar adaptif, `/status`, dan pratinjau UI tanpa model (lihat [Pengalaman pemakaian](#pengalaman-pemakaian)).
-- **Claude API langsung (v0.4):** agen utama bisa memakai model Claude lewat API key Anthropic Anda sendiri
-  (`/model api-opus`), tanpa Bedrock. Lihat [Koneksi Claude API](#koneksi-claude-api-anthropic).
-- **Kredensial tersembunyi:** memakai profile AWS lokal `agung` (`--profile agung` adalah default). Kunci tidak
-  pernah dibaca, ditulis, atau ditampilkan oleh MABA Code; boto3 memuatnya sendiri dari profile, dan SDK
-  `anthropic` membaca API key dari env `ANTHROPIC_API_KEY`.
+- **Mesin inti GPT-6 Luna** (`global.openai.gpt-6-luna`). Agen utama bisa diganti lewat `/model`, tetapi sub-agen,
+  skill `context: fork`, `web_fetch`, dan kompaksi selalu memakai Luna.
+- **Agentik:** tool file & shell, sub-agen, skills, hooks, klien MCP, task latar belakang, `/loop`, memori otomatis.
+- **Aman secara default:** izin deny → ask → allow ditegakkan harness (bukan model), dialog izin menjelaskan dampak,
+  perubahan file bisa dibatalkan dengan `/undo`.
+- **Kredensial tidak pernah disentuh:** boto3 membaca profile AWS dan SDK `anthropic` membaca `ANTHROPIC_API_KEY`.
+  MABA Code tidak membaca, mencetak, atau menyimpan kunci.
 
-## Mulai cepat
+## Instalasi
+
+**Prasyarat:** Python ≥ 3.10, Git, dan akses Amazon Bedrock lewat profile AWS (default bernama `agung`).
+**Opsional:** ripgrep (pencarian lebih cepat) dan API key Anthropic (untuk model `api-*`).
+
+### Windows (PowerShell)
 
 ```powershell
+winget install Python.Python.3.12
+winget install Git.Git
+winget install Amazon.AWSCLI              # untuk menyiapkan profile AWS
+winget install BurntSushi.ripgrep.MSVC    # opsional
+# tutup lalu buka ulang terminal agar PATH baru terbaca
+
+git clone https://github.com/AgungDwiSahputra/maba-code.git "D:\Workspace Agung\MABA"
 cd "D:\Workspace Agung\MABA"
-python -m maba_code --doctor        # uji profile → kredensial → STS → model (aman, tidak mencetak kunci)
-
-cd D:\proyek\saya                    # masuk ke proyek yang ingin dikerjakan
-& "D:\Workspace Agung\MABA\maba.cmd"                                 # sesi interaktif
-& "D:\Workspace Agung\MABA\maba.cmd" -p "jelaskan arsitektur proyek ini"   # sekali jalan
+python -m pip install -e .
 ```
 
-Opsional: `pip install -e .` di folder MABA agar perintah `maba` tersedia global.
-Dependensi: `strands-agents[anthropic]` (menarik SDK `anthropic`), `boto3`, `rich`, `prompt_toolkit`.
+Perintah `maba` kini tersedia di semua folder. Bila tidak dikenali (folder `Scripts` Python tidak ada di PATH),
+pakai launcher `& "D:\Workspace Agung\MABA\maba.cmd"` atau `python -m maba_code`.
 
-## Pengalaman pemakaian
+### macOS (Terminal, zsh)
 
-Tujuan antarmukanya: pengguna selalu tahu **apa yang sedang dikerjakan agen**, **apa yang akan terjadi bila ia
-menyetujui**, dan **apa yang bisa dilakukan berikutnya**.
-
-```
-❯ perbaiki bug di calc.py lalu jalankan tes
-● Cari file  **/calc.py
-  ⎿ ✓ 1 file · 0.2s
-● Baca  calc.py
-  ⎿ ✓ 8 baris (dari 8) · 0.2s
-╭─ ⚠ Izin diperlukan · TULIS ─────────────────────────────────╮
-│ Edit file  calc.py  (menulis file)                           │
-│ Agen menjelaskan: "Saya akan memperbaiki pembagi di mean."   │
-│ -    return sum(nums) / (len(nums) + 1)                      │
-│ +    return sum(nums) / len(nums)                            │
-│ Dampak: Mengubah isi file yang sudah ada. Bisa dibatalkan    │
-│ dengan /undo.                                                │
-│ Mode aktif: standar · tanya dulu                             │
-│ [y] Ya, terapkan perubahan                                   │
-│ [n] Tidak — agen diberi tahu lalu mencari cara lain          │
-│ [e] Tidak, beri arahan — Anda mengetik alasan/arahan         │
-│ Enter = Ya.                                                  │
-╰──────────────────────────────────────────────────────────────╯
-⠹ Menjalankan python -m unittest  langkah 3 · 12s · langkah ini 9s  (Esc untuk batal)
-  ✓ Selesai dalam 14s · 3 langkah
-    Diubah: calc.py (+1 −1)
-    Dijalankan: 1 perintah
-    1.2k masuk · 340 keluar · konteks 32% (diringkas otomatis di 75%)
-    Berikutnya: /undo membatalkan perubahan file
+```bash
+brew install python@3.12 git awscli ripgrep
+git clone https://github.com/AgungDwiSahputra/maba-code.git ~/maba-code
+cd ~/maba-code
+python3.12 -m venv .venv                 # Python Homebrew menolak pip install global (PEP 668)
+.venv/bin/pip install -e .
+echo 'alias maba="$HOME/maba-code/.venv/bin/maba"' >> ~/.zshrc && source ~/.zshrc
 ```
 
-Lihat semua tampilan tanpa memanggil model (tanpa biaya): `python -m maba_code.ui.preview` (opsi `--width 60`,
-`--ascii`, `--svg hasil.svg`).
+> MABA Code dikembangkan dan diuji di Windows; jalur macOS belum diuji. Di macOS, shell agen memakai bash dan
+> giliran dibatalkan dengan **Ctrl+C** (Esc hanya bekerja di konsol Windows).
 
-| Fitur | Cara pakai |
+### Kredensial
+
+**AWS (wajib).** Siapkan profile, lalu pastikan model yang dipakai sudah aktif di Bedrock untuk akun tersebut:
+
+```bash
+aws configure --profile agung        # access key + region, mis. ap-southeast-1
+aws configure sso --profile agung    # atau lewat SSO
+```
+
+Profile lain: `--profile NAMA`, env `MABA_PROFILE`, atau `"profile"` di `~/.maba/settings.json`.
+
+**Anthropic (opsional, untuk model `api-*`).** Simpan di environment pengguna, jangan di file proyek atau settings:
+
+| OS | Perintah |
 |---|---|
-| Kirim pesan | ketik lalu **Enter**; **Alt+Enter** atau `\` + Enter untuk baris baru. Input kosong menampilkan petunjuk (placeholder) |
-| Batalkan giliran | **Esc** (atau Ctrl+C); ketikan Anda saat agen bekerja tidak hilang, muncul lagi di prompt |
-| Baris status | saat agen bekerja: tahap (Berpikir / Menulis jawaban / Membaca … / Menjalankan …), nomor langkah, waktu berjalan, dan lama langkah yang lambat. Sub-agen tampil sebagai `explore › Membaca a.py (3 langkah)` |
-| Ringkasan giliran | selesai/dihentikan/batas tercapai, jumlah langkah, file yang diubah (+/−), perintah dijalankan, aksi ditolak, token & konteks, dan **langkah berikutnya** (mis. `/undo`). Waktu menunggu jawaban Anda dipisahkan dari waktu kerja |
-| Ganti mode izin | **Shift+Tab** (standar → terima-edit → rencana) atau `/mode`; arti mode baru tampil sesaat di toolbar |
-| Sertakan file/folder | ketik `@` → menu file & folder langsung muncul (bagian yang cocok di-highlight); isi file dilampirkan ke pesan (maks. 5 file); file rahasia tidak pernah muncul |
-| Shell langsung | `!git status` (hasilnya masuk konteks pesan berikutnya) |
-| Perintah | ketik `/` → menu semua perintah (bawaan, skill, kustom) + deskripsi langsung muncul |
-| Menu `/` & `@` | ↑/↓ pilih · **Tab** pilih (folder: lanjut ke isinya) · **Enter** pada `/…` menjalankan perintah yang di-highlight · **Enter** pada `@…` memilih file (Enter lagi untuk mengirim) · **Esc** tutup menu. Toolbar menampilkan petunjuk tombol yang sesuai |
-| Riwayat | ↑/↓ di baris pertama/terakhir, atau **Ctrl+R** untuk mencari |
-| Toolbar bawah | mode + keterangan (mis. "tanya dulu") · model · meter konteks `▰▰▱▱▱ 32%` (kuning ≥60%, merah ≥85%) · token · todo · task latar; bagian yang kurang penting dijatuhkan di terminal sempit |
-| Keadaan sesi | `/status`: mode, model, konteks, todo, file yang bisa di-undo, task latar, server MCP |
-| Pesan sistem | berikon per level: `ℹ` info · `✓` sukses · `⚠` peringatan · `✗` error (pengganti ASCII: `i v ! x`) |
-| Keluar | `/exit`, Ctrl+D, atau Ctrl+C dua kali |
+| Windows | `setx ANTHROPIC_API_KEY "sk-ant-..."` lalu tutup **penuh** terminal/VS Code dan buka lagi |
+| macOS | `echo 'export ANTHROPIC_API_KEY="sk-ant-..."' >> ~/.zshrc && source ~/.zshrc` |
+
+### Verifikasi
+
+```bash
+maba --doctor                     # profile → kredensial → STS → GPT-6 Luna (biaya kecil, kunci tidak dicetak)
+maba --model api-opus --doctor    # sekaligus menguji Claude API
+```
+
+## Pemakaian
+
+```bash
+cd folder-proyek
+maba                                         # sesi interaktif
+maba -p "jelaskan arsitektur proyek ini"     # sekali jalan (juga otomatis bila input lewat pipe)
+maba -c                                      # lanjutkan sesi terakhir di folder ini
+```
+
+| Tombol | Fungsi |
+|---|---|
+| **Enter** · **Alt+Enter** (atau `\` + Enter) | kirim · baris baru |
+| **Esc** / Ctrl+C | batalkan giliran; ketikan Anda saat agen bekerja tidak hilang |
+| **Shift+Tab** | ganti mode izin: standar → terima-edit → rencana |
+| `@` | lampirkan file/folder (maks. 5; file rahasia tidak pernah muncul) |
+| `/` | menu perintah (bawaan, skill, kustom); **Tab** memilih, **Enter** menjalankan |
+| `!perintah` | jalankan shell langsung; hasilnya masuk konteks pesan berikutnya |
+| ↑/↓ · Ctrl+R | riwayat · cari riwayat |
+| Ctrl+D · `/exit` | keluar |
+
+Saat agen bekerja, baris status menampilkan tahap, langkah, dan waktu. Setiap giliran ditutup ringkasan: file yang
+diubah, perintah, aksi ditolak, token, konteks, dan langkah berikutnya. Toolbar bawah menampilkan mode, model, meter
+konteks, token, todo, dan task latar. Semua tampilan bisa dilihat tanpa memanggil model:
+`python -m maba_code.ui.preview` (opsi `--width 60`, `--ascii`, `--svg hasil.svg`).
 
 ### Perintah slash
 
-`/help` `/clear` `/model [alias]` `/effort [level]` `/mode [nama]` `/plan [tugas]` `/compact [fokus]` `/resume [no|id]` `/todo` `/undo`
-`/status` `/cost` `/init` `/memory` `/tools` `/permissions` `/config` `/doctor` `/exit`
-`/agents` `/skills` `/tasks [stop id]` `/loop [interval] <prompt>` `/mcp`
+| Kelompok | Perintah |
+|---|---|
+| Percakapan | `/clear` `/resume [no\|id]` `/compact [fokus]` `/undo` `/todo` `/exit` |
+| Model & izin | `/model [alias]` `/effort [level]` `/mode [nama]` `/plan [tugas]` `/permissions` `/tools` |
+| Proyek & ekstensi | `/init` `/memory` `/agents` `/skills` `/mcp` `/tasks [stop id]` `/loop [interval] <prompt>` |
+| Info | `/status` `/cost` `/config` `/doctor` `/help` |
 
-Perintah kustom: simpan prompt di `.maba/commands/nama.md` (atau `~/.maba/commands/`) — gunakan `$ARGUMENTS`.
-Frontmatter `description:` opsional. Skill yang bisa dipanggil pengguna juga muncul sebagai `/nama` (dan menang atas
-perintah kustom bernama sama).
+Perintah kustom: `.maba/commands/nama.md` atau `~/.maba/commands/nama.md` (pakai `$ARGUMENTS`, frontmatter
+`description:` opsional). Skill yang bisa dipanggil pengguna juga muncul sebagai `/nama`.
 
-### Alias model
+### Model
 
 | Alias | Model ID | Jalur |
 |---|---|---|
@@ -103,285 +120,175 @@ perintah kustom bernama sama).
 | `api-haiku` | `anthropic/claude-haiku-5-5` | Claude API |
 | `nova-2-lite` (juga `nova 2 lite`) | `global.amazon.nova-2-lite-v1:0` | Bedrock |
 
-Model lain tetap bisa dipakai dengan ID lengkap: ID Bedrock (`global.…`; model OpenAI di Bedrock **wajib** lewat
-inference profile) atau `anthropic/<model-id>` untuk Claude API (butuh `ANTHROPIC_API_KEY`).
-`/model` hanya mengganti **agen utama**; semua agen anak tetap GPT-6 Luna. `--doctor` selalu ikut menguji Luna.
+Model lain bisa dipakai dengan ID lengkap: ID Bedrock (`global.…`; model OpenAI di Bedrock **wajib** lewat inference
+profile) atau `anthropic/<model-id>`. `/model` hanya mengganti **agen utama**; agen anak tetap GPT-6 Luna, jadi
+profile AWS tetap diperlukan walau memakai Claude API.
 
-### Koneksi Claude API (Anthropic)
+**Catatan jalur Claude API:**
 
-1. **Simpan API key di environment pengguna**, bukan di file proyek atau settings (jangan tempel kunci ke chat):
-
-   ```powershell
-   setx ANTHROPIC_API_KEY "sk-ant-..."      # lalu TUTUP dan buka ulang terminal
-   ```
-
-2. **Uji koneksinya** (satu panggilan kecil berbiaya sangat rendah, kunci tidak pernah dicetak):
-
-   ```powershell
-   python -m maba_code --model api-opus --doctor
-   ```
-
-3. **Pakai:** `maba --model api-opus`, atau `/model api-opus` di tengah sesi. Agar permanen, isi
-   `~/.maba/settings.json` dengan `{"model": "api-opus"}`.
-
-Yang perlu diketahui:
-
-- Hanya **agen utama** yang pindah ke Claude API. Sub-agen, skill `fork`, `web_fetch`, dan kompaksi tetap GPT-6
-  Luna di Bedrock, jadi profile AWS tetap diperlukan.
-- `effort` (`low` · `medium` · `high` · `xhigh` · `max`, default `medium`) mengatur kedalaman berpikir model, yang
-  memengaruhi biaya dan kecepatan. Ganti di tengah sesi dengan `/effort high` (tanpa argumen: daftar level), sekali
-  jalan dengan `--effort high`, atau permanen di settings: `{"effort": "high"}`. Mengganti effort membuat cache
-  prompt dimulai ulang sekali; riwayat percakapan tidak berubah. Pada model Bedrock nilainya disimpan saja.
-- Model Claude terbaru selalu berpikir sebelum menjawab, dan token pikiran ikut dihitung. Karena itu batas keluaran
-  default jalur ini 64.000 token (Bedrock tetap 8.192), kecuali Anda menyetel `maxTokens`.
-- Otomatis aktif: *prompt caching* (riwayat yang dikirim ulang ditagih jauh lebih murah); `drop_block` untuk blok
-  thinking yang tidak lagi cocok setelah kompaksi atau perubahan system prompt (tanpa ini akun Anthropic baru
-  mendapat error 400); serta *fallback* sisi server: bila pengaman Anthropic menolak permintaan, API mencoba model
-  cadangan (Opus/Sonnet/Fable; tidak untuk Haiku).
-- Biaya Claude API ditagih ke akun Anthropic pemilik API key, terpisah dari tagihan AWS.
+- **Effort** (`low` · `medium` · `high` · `xhigh` · `max`, default `medium`) mengatur kedalaman berpikir, biaya, dan
+  kecepatan: `/effort high`, `--effort high`, atau `"effort"` di settings. Menggantinya memulai ulang cache prompt
+  sekali; riwayat tidak berubah.
+- Batas keluaran default 64.000 token karena token pikiran ikut dihitung (Bedrock: 8.192). Ubah lewat `maxTokens`.
+- Otomatis aktif: prompt caching; `drop_block` agar blok thinking lama tidak memicu error 400 setelah kompaksi; dan
+  fallback sisi server bila pengaman Anthropic menolak permintaan (Opus/Sonnet, bukan Haiku).
+- Biaya ditagih ke akun Anthropic pemilik API key, terpisah dari tagihan AWS.
 
 ## Izin & keamanan
 
-Tiga kelas tool, ditegakkan oleh harness (hook Strands), bukan oleh model:
-
 | Kelas | Tool | Perilaku |
 |---|---|---|
-| Baca | `read_file` `glob_files` `grep_files` `todo_write` `explore` `task` `skill` `task_stop` | otomatis (di luar folder kerja: ditanya, kecuali folder skill, log task & memori) |
-| Tulis | `write_file` `edit_file` | ditanya, dengan diff (`.md` di folder memori otomatis: otomatis) |
-| Berbahaya | `run_command` | ditanya (perintah baca-saja seperti `git status` otomatis; di latar belakang selalu ditanya) |
-| Internet | `web_fetch` | ditanya; "jangan tanya lagi" = `web_fetch(domain:host)` |
-| MCP | `mcp__<server>__<tool>` | selalu ditanya; aturan `mcp__server`, `mcp__server__*`, `mcp__server__tool` |
+| Baca | `read_file` `glob_files` `grep_files` `todo_write` `explore` `task` `skill` `task_stop` | otomatis (di luar folder kerja: ditanya) |
+| Tulis | `write_file` `edit_file` | ditanya dengan diff; Enter = Ya |
+| Berbahaya | `run_command` | ditanya (perintah baca-saja seperti `git status` otomatis); harus `y` |
+| Internet | `web_fetch` | ditanya; "jangan tanya lagi" = `web_fetch(domain:host)`; harus `y` |
+| MCP | `mcp__<server>__<tool>` | selalu ditanya; harus `y` |
 
-Sub-agen (`task`) sendiri tidak ditanya, tetapi **setiap tool yang dipakai sub-agen** melewati kebijakan yang sama;
-dialognya diberi label `[sub-agen nama]`.
-
-**Dialog izin** selalu menjelaskan tiga hal: *apa* yang diminta (judul, target, diff/perintah, dan kutipan kalimat
-terakhir agen sebelum memanggil tool bila ada), *dampaknya* bila disetujui, dan *apa yang terjadi* setelah dijawab.
-Lencana kelas izin di judul panel: `TULIS` (kuning) · `BERBAHAYA` · `INTERNET` · `MCP` (merah). Untuk tiga kelas
-terakhir **Enter tidak menyetujui**; harus menekan `y` (edit file tetap Enter = Ya).
-
-Mode: **default** · **acceptEdits** (edit di folder kerja otomatis) · **plan** (hanya baca, lalu `exit_plan_mode`
-untuk persetujuan) · **bypass** (semua otomatis; hanya untuk lingkungan yang Anda percaya).
-
-Aturan evaluasi: **deny → ask → allow**; allow tidak bisa membatalkan deny. Contoh `~/.maba/settings.json`:
+Tool yang dipakai sub-agen melewati kebijakan yang sama (dialog berlabel `[sub-agen nama]`). Mode: **default** ·
+**acceptEdits** (edit di folder kerja otomatis) · **plan** (hanya baca, lalu mengajukan rencana) · **bypass** (semua
+otomatis; hanya untuk lingkungan tepercaya). Aturan dievaluasi **deny → ask → allow**; allow tidak bisa membatalkan
+deny. Contoh `~/.maba/settings.json`:
 
 ```json
 {
   "profile": "agung",
   "model": "gpt-6-luna",
+  "effort": "medium",
   "contextWindow": 256000,
   "permissions": {
-    "allow": ["run_command(dotnet build*)", "run_command(npm test*)", "web_fetch(domain:*.python.org)", "mcp__github__*"],
+    "allow": ["run_command(npm test*)", "web_fetch(domain:*.python.org)", "mcp__github__*"],
     "ask":   ["run_command(git push*)"],
     "deny":  ["run_command(rm *)", "run_command(Remove-Item*)"]
   },
-  "autoMemory": true,
-  "hooks": { "...": "lihat bagian Hooks" },
-  "mcpServers": { "...": "lihat bagian MCP" }
+  "autoMemory": true
 }
 ```
 
 Pagar tambahan:
+
 - **Rahasia diblokir** (juga di mode bypass): `.env*`, `*.pem`, `*.key`, `~/.aws`, `~/.ssh`, serta perintah yang
-  menyentuhnya atau mencetak `AWS_SECRET_ACCESS_KEY`. Autocomplete & grep ikut menyaring file ini.
-- Proses `run_command` **tidak mewarisi** variabel lingkungan kredensial (`AWS_SECRET_ACCESS_KEY`, token, dsb.).
-- **Settings proyek tidak dipercaya**: `.maba/settings*.json` di repo hanya boleh menambah aturan `deny`/`ask` dan
-  mengatur `model`/batas; `profile`, `region`, `mode`, `permissions.allow`, `hooks`, `mcpServers`, dan `autoMemory`
-  diabaikan (dilaporkan sebagai peringatan). Server MCP dari `.mcp.json` proyek perlu persetujuan; skill proyek tidak
-  boleh memberi izin lewat `allowed-tools`.
-- Aturan allow berpola tidak berlaku untuk perintah majemuk (`;` `&&` `|` `>` …); `python …` dsb. hanya cocok persis.
-- Edit wajib didahului `read_file` dan ditolak bila file berubah di disk setelah dibaca.
+  menyentuhnya. Proses `run_command` tidak mewarisi env kredensial (AWS, `ANTHROPIC_API_KEY`, token Git, dsb.).
+- **Settings proyek tidak dipercaya:** `.maba/settings*.json` di repo hanya boleh mengatur `model`, `effort`, batas
+  (`contextWindow`, `maxTokens`, `maxTurns`) dan menambah aturan `deny`/`ask`. Kunci lain diabaikan dengan peringatan.
+- Aturan allow berpola tidak berlaku untuk perintah majemuk (`;` `&&` `|` `>` …). Edit wajib didahului `read_file`
+  dan ditolak bila file berubah di disk setelah dibaca.
 
 > Pagar berbasis pola ini *best-effort*, bukan sandbox. Perlindungan sebenarnya adalah izin IAM minimal pada profile
-> Anda dan membiarkan mode default tetap aktif untuk proyek yang tidak dikenal.
+> Anda dan mode default untuk proyek yang tidak dikenal.
 
-## Memori proyek
+## Ekstensi
 
-`MABA.md` (setara `CLAUDE.md`) dimuat otomatis: `~/.maba/MABA.md` → `MABA.md`/`.maba/MABA.md` dari akar sampai
-folder kerja → `MABA.local.md`. Mendukung `@impor/file.md`. Buat otomatis dengan `/init`.
+**Memori proyek.** `MABA.md` dimuat otomatis dari `~/.maba/MABA.md`, lalu `MABA.md`/`.maba/MABA.md` dari akar sampai
+folder kerja, lalu `MABA.local.md` (mendukung `@impor/file.md`); buat dengan `/init`. Agen juga menulis memori
+otomatis di `~/.maba/projects/<proyek>/memory/` (lihat dengan `/memory`, matikan dengan `"autoMemory": false`).
 
-### Memori otomatis
-
-Agen menulis catatannya sendiri di `~/.maba/projects/<proyek>/memory/` (satu fakta per file `.md`, indeks
-`MEMORY.md`; 200 baris / 25 KB pertama indeks dimuat tiap sesi). Menulis `.md` di folder itu tidak memerlukan dialog
-(plan mode tetap memblokir; pagar rahasia tetap berlaku) dan setiap penulisan diumumkan di layar. Lihat dengan
-`/memory`; matikan dengan `"autoMemory": false` di `~/.maba/settings.json`.
-
-## Sub-agen
-
-Tool `task(subagent_type, prompt)` menjalankan sub-agen di **konteks baru** (selalu GPT-6 Luna); hanya laporan
-akhirnya yang kembali. Beberapa `task` dalam satu giliran berjalan paralel. Sub-agen boleh bersarang satu tingkat
-(sub-agen tingkat 2 tidak lagi mendapat `task`). Bawaan:
-
-| Nama | Tool | Izin |
-|---|---|---|
-| `explore` | baca/cari | read-only; permintaan izin otomatis ditolak (juga tersedia sebagai tool `explore`) |
-| `plan` | baca/cari | read-only; mengembalikan rencana implementasi |
-| `general-purpose` | semua tool (kecuali `todo_write`/`exit_plan_mode`) | sama dengan agen utama; dialog berlabel `[sub-agen …]` |
-
-Agen sendiri: `~/.maba/agents/*.md` atau `.maba/agents/*.md` (file pengguna menang):
+**Sub-agen.** Tool `task` menjalankan sub-agen GPT-6 Luna di konteks baru; beberapa `task` berjalan paralel. Bawaan:
+`explore` (read-only), `plan` (read-only, mengembalikan rencana), `general-purpose` (semua tool). Sub-agen sendiri di
+`~/.maba/agents/*.md` atau `.maba/agents/*.md`:
 
 ```markdown
 ---
 name: reviewer
 description: Meninjau diff untuk bug & keamanan. Gunakan setelah perubahan kode.
 tools: read_file, grep_files, glob_files     # opsional; nama Claude Code (Read, Grep, Bash…) juga diterima
-disallowedTools: run_command                 # opsional
 maxTurns: 20                                 # opsional (default 25)
 ---
 Kamu peninjau kode yang teliti…
 ```
 
-Field `model:` diabaikan dengan peringatan: sub-agen MABA selalu GPT-6 Luna. Lihat daftar dengan `/agents`.
+**Skills.** `~/.maba/skills/<nama>/SKILL.md` atau `.maba/skills/<nama>/SKILL.md`. Hanya `nama: deskripsi` yang masuk
+system prompt; isi lengkap dimuat saat model memanggil tool `skill` atau pengguna mengetik `/nama`. Frontmatter:
+`description`, `allowed-tools` (skill pengguna saja), `disable-model-invocation`, `user-invocable`, `context: fork`,
+`agent`. Variabel `${MABA_SKILL_DIR}` menunjuk folder skill.
 
-## Skills
-
-`~/.maba/skills/<nama>/SKILL.md` atau `.maba/skills/<nama>/SKILL.md` (+ file pendukung di folder yang sama). Hanya
-`nama: deskripsi` yang masuk system prompt; isi lengkap dimuat saat model memanggil tool `skill` atau pengguna
-mengetik `/nama argumen`.
-
-```markdown
----
-description: Siapkan catatan rilis dari git log. Gunakan saat diminta membuat release notes.
-allowed-tools: Bash(git log *) run_command(git tag *)   # izin tanpa dialog selama giliran itu (skill pengguna saja)
-disable-model-invocation: false                          # true = hanya lewat /nama
-user-invocable: true                                     # false = hanya model
-context: fork                                            # opsional: jalankan di sub-agen (GPT-6 Luna)
-agent: general-purpose                                   # sub-agen untuk context: fork
----
-Buat catatan rilis untuk $ARGUMENTS memakai template ${MABA_SKILL_DIR}/template.md …
-```
-
-## Hooks
-
-Perintah shell yang dijalankan harness di titik-titik siklus agen (format Claude Code). **Hanya** dari
-`~/.maba/settings.json`; kunci `hooks` di settings proyek diabaikan.
+**Hooks** (format Claude Code, **hanya** dari `~/.maba/settings.json`):
 
 ```json
 "hooks": {
-  "PreToolUse":  [{"matcher": "run_command|Bash", "hooks": [{"type": "command", "command": "python C:/hooks/cek.py", "timeout": 30}]}],
-  "PostToolUse": [{"matcher": "edit_file|write_file", "hooks": [{"type": "command", "command": "npx prettier --check ."}]}],
-  "Stop":        [{"hooks": [{"type": "command", "command": "python C:/hooks/wajib-tes.py"}]}]
+  "PreToolUse": [{"matcher": "run_command|Bash", "hooks": [{"type": "command", "command": "python C:/hooks/cek.py"}]}],
+  "Stop":       [{"hooks": [{"type": "command", "command": "python C:/hooks/wajib-tes.py"}]}]
 }
 ```
 
-| Event | Kapan | Efek khusus |
-|---|---|---|
-| `PreToolUse` | sebelum tool, sebelum kebijakan izin dievaluasi | exit 2 / `permissionDecision: deny` memblokir (alasan ke model); `allow` melewati dialog *ask* (tidak bisa melewati deny/plan/pagar rahasia); `ask` memaksa dialog; `updatedInput` mengganti argumen (lalu dievaluasi ulang) |
-| `PostToolUse` | setelah tool berhasil berjalan | `additionalContext` / exit 2 ditempel ke hasil tool |
-| `UserPromptSubmit` | sebelum prompt dikirim | exit 2 memblokir prompt; stdout menjadi konteks |
-| `Stop` / `SubagentStop` | agen selesai menjawab | exit 2 / `decision: block` memaksa lanjut dengan alasan (maks. 8×) |
-| `SessionStart` | startup, resume, clear, compact | stdout menjadi konteks pesan berikutnya |
-| `SessionEnd` | keluar | — (timeout 5 s) |
-| `PreCompact` | sebelum kompaksi manual/otomatis | — |
+Event: `PreToolUse` (exit 2 atau `permissionDecision: deny` memblokir; `allow` melewati dialog *ask*; `updatedInput`
+mengganti argumen) · `PostToolUse` · `UserPromptSubmit` · `Stop`/`SubagentStop` (exit 2 memaksa lanjut, maks. 8×) ·
+`SessionStart` · `SessionEnd` · `PreCompact`. Exit 0 = sukses (stdout JSON diproses), 2 = blokir (stderr = alasan).
+Matcher: kosong/`*` = semua, `A|B` = nama persis, selain itu regex. Timeout default 600 s.
 
-Stdin JSON: `session_id`, `transcript_path`, `cwd`, `permission_mode`, `hook_event_name`, `tool_name`, `tool_input`,
-`tool_use_id`, `tool_response`, `prompt`, `stop_hook_active`, `agent_type`, `source`, `reason`, `trigger`.
-Exit 0 = sukses (stdout JSON diproses), exit 2 = blokir (stderr = alasan), lainnya = peringatan non-blokir.
-Matcher: kosong/`*` = semua, `A|B` = daftar nama persis (alias Claude Code `Bash`, `Edit`, `Write`, `Read`, … diterima),
-selain itu regex. Hook yang cocok berjalan paralel; keputusan paling ketat menang. Timeout default 600 s; Esc
-membatalkan. Env tambahan: `MABA_PROJECT_DIR` (juga `CLAUDE_PROJECT_DIR`).
-
-## MCP
+**MCP.** `~/.maba/mcp.json` (dipercaya) atau `.mcp.json` di proyek (perlu persetujuan sekali per server):
 
 ```json
-// ~/.maba/mcp.json (dipercaya)  atau  .mcp.json di proyek (perlu persetujuan sekali per server)
 {"mcpServers": {
   "github": {"command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"], "env": {"GITHUB_TOKEN": "${GITHUB_TOKEN}"}},
   "docs":   {"type": "http", "url": "https://example.com/mcp", "headers": {"Authorization": "Bearer ${DOCS_TOKEN}"}}
 }}
 ```
 
-Server dijalankan saat sesi mulai (stdio, `http`, atau `sse`); tool-nya muncul sebagai `mcp__<server>__<tool>` (nama
-disanitasi agar valid untuk Bedrock, maks. 64 karakter) dan selalu ditanya. Persetujuan server proyek disimpan di
-`~/.maba/mcp-trust.json` bersama sidik jari konfigurasinya (konfigurasi berubah → ditanya lagi); di mode `-p` server
-proyek yang belum disetujui dilewati. `${VAR}` bernama mirip rahasia (TOKEN, KEY, SECRET, …) **tidak** diekspansi untuk
-`.mcp.json` proyek. Output tool dipotong 100k karakter; stderr server ditulis ke `~/.maba/logs/mcp-<proyek>.log`.
-Status: `/mcp`.
+Transport stdio, `http`, atau `sse`; tool muncul sebagai `mcp__<server>__<tool>` dan selalu ditanya. Konfigurasi
+proyek yang berubah ditanya ulang; `${VAR}` bernama mirip rahasia tidak diekspansi untuk `.mcp.json` proyek. Status: `/mcp`.
 
-## Task latar belakang & `/loop`
+**Task latar belakang & `/loop`.** `run_command(..., run_in_background=true)` mengembalikan id `bg-xxxxxx` (log di
+`~/.maba/tasks/<proyek>/`; maks. 8 berjalan; dihentikan dengan `/tasks stop <id>`). `/loop 5m <prompt>` mengulang
+tiap interval (default 10m, min. 10s, maks. 20 iterasi).
 
-- `run_command(..., run_in_background=true)` langsung mengembalikan id `bg-xxxxxx`; output ditulis ke
-  `~/.maba/tasks/<proyek>/<id>.log` (model membacanya dengan `read_file`). Saat selesai, ringkasan (exit code + 20 baris
-  terakhir) disisipkan ke pesan berikutnya. `task_stop` / `/tasks stop <id>` menghentikan; maks. 8 berjalan; semua
-  dimatikan saat MABA Code keluar. Toolbar menampilkan jumlah task yang berjalan.
-- `/loop 5m <prompt atau /perintah>` mengulang tiap interval tetap (default 10m, minimum 10s, maks. 20 iterasi);
-  berhenti dengan Esc/Ctrl+C, saat error, atau saat prompt diblokir hook.
+**`web_fetch`.** Halaman diubah ke Markdown lalu dijawab sub-agen Luna tanpa tool. URL http dinaikkan ke https; redirect ke
+host lain tidak diikuti; host lokal/privat dan URL berkredensial ditolak; cache 15 menit; maks. 5 MB.
 
-## web_fetch
+## Sesi & opsi CLI
 
-`web_fetch(url, prompt)`: halaman diubah ke Markdown lalu dijawab oleh sub-agen GPT-6 Luna tanpa tool (isi halaman
-diperlakukan sebagai data tak tepercaya). http → https, redirect ke host lain dikembalikan (tidak diikuti), cache
-15 menit, maks. 5 MB / 100k karakter. Host lokal/privat (termasuk hasil DNS ke IP privat) dan URL berkredensial ditolak.
-Tidak ada WebSearch: Bedrock tidak menyediakan backend pencarian.
+Percakapan tersimpan di `~/.maba/sessions/<proyek>/` (lanjutkan dengan `-c`, `--resume ID`, atau `/resume`). Konteks
+diringkas otomatis di ≈75% window atau manual dengan `/compact`. `/undo` mengembalikan file yang diubah agen pada
+giliran terakhir (perubahan lewat `run_command` tidak dilacak).
 
-## Sesi
-
-Setiap percakapan disimpan di `~/.maba/sessions/<proyek>/`. Lanjutkan dengan `--continue`, `--resume ID`, atau `/resume`.
-Konteks panjang diringkas otomatis (≈75% window) atau manual dengan `/compact`. `/undo` mengembalikan file yang
-diubah agen pada giliran terakhir (perubahan lewat `run_command` tidak dilacak).
-
-## Opsi CLI
-
-`-p/--print` · `--profile` · `--model` · `--region` · `--mode` · `--effort` · `--max-turns` · `-c/--continue` · `--resume ID` ·
-`--cwd` · `--doctor` · `--version`. Tanpa terminal (mis. `echo "..." | maba`) otomatis memakai mode `-p`.
-Env: `MABA_PROFILE`, `MABA_MODEL`, `MABA_REGION`, `MABA_MODE`, `MABA_HOME`, `MABA_ASCII=1`, `MABA_DEBUG=1` (log ke `~/.maba/debug.log`).
+Opsi: `-p` · `--profile` · `--model` · `--effort` · `--region` · `--mode` · `--max-turns` · `-c` · `--resume ID` ·
+`--cwd` · `--doctor` · `--version`. Env: `MABA_PROFILE`, `MABA_MODEL`, `MABA_REGION`, `MABA_MODE`, `MABA_HOME`,
+`MABA_ASCII=1`, `MABA_DEBUG=1` (log ke `~/.maba/debug.log`).
 
 ## Pengujian
 
-```powershell
-python -m unittest discover -s tests -t .      # 188 uji, offline, ±2 menit
+```bash
+python -m unittest discover -s tests -t .      # 211 uji, offline, ±2 menit
 ```
 
-Suite memakai model skrip yang mengalirkan event Converse sungguhan, sehingga loop Strands, hook izin, tool, UI, dan
-prompt_toolkit (lewat pipe input) benar-benar dijalankan tanpa jaringan. Fitur v0.2 diuji di `tests/test_extensions.py`:
-hook memakai skrip Python sungguhan lewat PowerShell, MCP memakai server FastMCP lokal (`tests/fixtures/`),
-`web_fetch` memakai `httpx.MockTransport`, dan `LunaPinTests` membuktikan semua agen anak memakai GPT-6 Luna setelah
-`/model sonnet`. Antarmuka (status, dialog izin, ringkasan giliran, toolbar, banner, `/help`, `/status`) diuji di
-`tests/test_ui_ux.py`, termasuk lewat prompt_toolkit sungguhan. Pengujian nyata ke Bedrock: `--doctor` dan `-p`.
+Folder `tests/` tidak ikut ter-commit (lihat `.gitignore`). Suite memakai model skrip yang mengalirkan event
+sungguhan, jadi loop Strands, hook izin, tool, UI, dan prompt_toolkit benar-benar berjalan tanpa jaringan. Jalur
+Claude API diuji dengan `httpx.MockTransport`. Uji nyata: `--doctor` dan `-p`.
 
 ## Riwayat versi
 
-Versi ada di dua tempat yang dijaga tes (`VersionTests`): `maba_code/__init__.py` dan `pyproject.toml`.
-Tampil di banner, `--version`, `--doctor`, dan User-Agent `web_fetch`. Setelah menaikkan versi, jalankan ulang
-`pip install -e .` agar metadata paket ikut diperbarui.
+Versi dijaga di `maba_code/__init__.py` dan `pyproject.toml` (`VersionTests`). Setelah menaikkan versi, jalankan
+ulang `pip install -e .`.
 
 | Versi | Isi |
 |---|---|
-| **0.4.0** | **Koneksi Claude API langsung.** Model berawalan `anthropic/` (alias `api-opus`, `api-sonnet`, `api-haiku`) dipanggil ke Claude API dengan `ANTHROPIC_API_KEY`; daftar `/model` diringkas menjadi `gpt-6-luna`, `api-opus`, `api-sonnet`, `api-haiku`, dan `nova-2-lite` (Amazon Nova 2 Lite, baru); alias lama (`luna`, `sol`, `astra`, `sonnet`, `opus`, `haiku`, `fable`, `kimi`, `glm`, `grok`) dihapus, modelnya tetap bisa dipakai lewat ID lengkap; effort lewat `/effort`, `--effort`, atau setting `effort`; batas keluaran 64K untuk jalur ini; prompt caching, `drop_block` untuk preserved thinking, dan fallback sisi server; `--doctor`/`/model`/`/config` mengenali jalur ini; pesan error Anthropic yang ramah; `ANTHROPIC_AUTH_TOKEN` ikut disaring dari shell agen. Dependensi kini `strands-agents[anthropic]`. **Perubahan perilaku:** `maxTokens` tanpa nilai berarti default per jalur model. |
-| **0.3.0** | **Antarmuka yang menjelaskan diri.** Baris status berisi tahap, langkah, dan waktu; sub-agen terlihat; dialog izin berlencana (TULIS/BERBAHAYA/INTERNET/MCP) dengan dampak dan kutipan agen; ringkasan akhir giliran (file diubah, perintah, aksi ditolak, token, konteks, langkah berikutnya); pesan berikon per level; toolbar adaptif dengan meter konteks dan petunjuk sesuai menu; placeholder input; banner adaptif dengan catatan kesiapan; `/help` berkelompok; `/status`; pengumuman kompaksi otomatis; peringatan mendekati batas giliran; `python -m maba_code.ui.preview`. **Perubahan perilaku:** Enter tidak lagi menyetujui dialog berbahaya/internet/MCP (harus `y`). |
-| 0.2.0 | Kemampuan agentik: hooks, sub-agen dari file, skills, klien MCP, task latar belakang, `/loop`, memori otomatis, `web_fetch`. |
+| **0.4.0** | **Claude API langsung:** model `anthropic/…` (alias `api-opus`/`api-sonnet`/`api-haiku`) memakai `ANTHROPIC_API_KEY`, dengan `/effort`/`--effort`, batas keluaran 64K, prompt caching, `drop_block`, dan fallback sisi server. Model baru `nova-2-lite`. **Perubahan perilaku:** `/model` hanya menawarkan 5 alias; alias lama (`luna`, `sonnet`, `opus`, dll.) dihapus, modelnya tetap bisa dipakai lewat ID lengkap. Dependensi kini `strands-agents[anthropic]`. |
+| **0.3.0** | Antarmuka yang menjelaskan diri: baris status, dialog izin berlencana dengan dampak, ringkasan akhir giliran, toolbar adaptif, `/status`, pratinjau UI. **Perubahan perilaku:** Enter tidak lagi menyetujui dialog berbahaya/internet/MCP. |
+| 0.2.0 | Hooks, sub-agen dari file, skills, klien MCP, task latar belakang, `/loop`, memori otomatis, `web_fetch`. |
 | 0.1.0 | Agen terminal dasar: tool file/shell, izin deny → ask → allow, sesi, kompaksi, mode izin. |
 
 ## Batasan yang diketahui
 
-- Tampilan TTY interaktif diuji lewat pipe input & console rekam, **bukan** diamati visual di terminal sungguhan.
-  Pengamat Esc dan *type-ahead* (memakai `msvcrt`, hanya aktif di konsol Windows nyata) tidak punya uji otomatis;
-  Ctrl+C sebagai pembatal giliran juga belum diuji di TTY nyata. Untuk menilai tampilan tanpa memanggil model,
-  pakai `python -m maba_code.ui.preview`. Animasi baris status (spinner) hanya terlihat di terminal sungguhan.
-- Pengumuman kompaksi otomatis diuji dengan memanggil `reduce_context` langsung; pemicu proaktif Strands di 75% baru
-  terbukti pada sesi panjang nyata. Mode `-p` belum diamati terhadap Bedrock setelah pembaruan UI v0.3.
-- `contextWindow` untuk `gpt-6-luna` adalah **asumsi** 256k (tidak ada di tabel Strands); sesuaikan bila perlu.
-- Biaya dolar tidak dihitung (tarif model akun Anda tidak diketahui); `/cost` menampilkan token.
-- Pembatalan (Esc) menghentikan model di batas chunk dan `run_command`; tool sinkron pihak ketiga tidak bisa diinterupsi.
-- Hooks hanya tipe `command` (belum `http`/`prompt`/`agent`/`mcp_tool`); event lain Claude Code (PermissionRequest,
-  Notification, …) belum ada. `/loop` hanya interval tetap (belum self-paced/cron). Sub-agen belum bisa dijalankan
-  di latar belakang atau dilanjutkan. Resource/prompt MCP belum diekspos (hanya tool).
-- Task latar belakang dimatikan saat keluar normal/Ctrl+C; bila proses MABA dibunuh paksa, task bisa tertinggal
-  (sengaja tidak ada "pembersihan PID" otomatis karena PID bisa dipakai ulang proses lain).
-- Memori otomatis bisa terisi catatan yang keliru (mis. dari prompt injection di file yang dibaca): periksa `/memory`.
+- Tampilan TTY interaktif diuji lewat pipe input dan console rekam, belum diamati visual di terminal sungguhan.
+  Pembatalan dengan Esc hanya ada di konsol Windows dan tidak punya uji otomatis.
+- macOS belum diuji. Kompaksi otomatis di 75% baru diuji secara tidak langsung.
+- Jalur Claude API baru diuji dengan server palsu, ditambah satu panggilan nyata lewat `--doctor`.
+- `contextWindow` GPT-6 Luna adalah asumsi 256k. Biaya dalam dolar tidak dihitung (`/cost` menampilkan token).
+- Esc menghentikan model di batas chunk dan `run_command`; tool sinkron pihak ketiga tidak bisa diinterupsi.
+- Hooks hanya tipe `command`. `/loop` hanya interval tetap. Resource/prompt MCP belum diekspos.
+- Task latar belakang tertinggal bila proses MABA dibunuh paksa. Memori otomatis bisa berisi catatan keliru
+  (mis. dari prompt injection): periksa `/memory`.
 - Belum ada: WebSearch, membaca gambar/PDF, antrean pesan, checkpoint persisten antar-proses.
 
 ## Struktur
 
 ```
 maba_code/
-  cli.py  repl.py  session.py  commands.py   # titik masuk, REPL, orkestrasi agen, perintah slash
-  permissions.py  tools.py  fsops.py  shell.py  workspace.py   # izin, tool, utilitas file, shell
-  config.py  models.py  memory.py  prompts.py  mentions.py     # settings + CORE_MODEL, Bedrock, MABA.md, prompt, @file
-  hooks.py  agents.py  skills.py  frontmatter.py               # hooks pengguna, sub-agen, skills
-  tasks.py  web.py  mcp_support.py                             # task latar belakang, web_fetch, klien MCP
-  ui/  terminal.py  prompt.py  markdown_stream.py  keys.py  theme.py   # tampilan, input, simbol & label
-       activity.py  preview.py                                          # status kerja agen, pratinjau UI
-tests/  (fixtures/mcp_echo_server.py)   docs/REA-LAPORAN.md   MABA.md   maba.cmd
+  cli.py  repl.py  session.py  commands.py                    # titik masuk, REPL, orkestrasi agen, perintah slash
+  config.py  models.py  anthropic_api.py                      # settings + alias model, Bedrock, Claude API
+  permissions.py  tools.py  fsops.py  shell.py  workspace.py  # izin, tool, utilitas file, shell
+  memory.py  prompts.py  mentions.py                          # MABA.md, system prompt, @file
+  hooks.py  agents.py  skills.py  frontmatter.py              # hooks pengguna, sub-agen, skills
+  tasks.py  web.py  mcp_support.py                            # task latar belakang, web_fetch, klien MCP
+  ui/  terminal.py  prompt.py  markdown_stream.py  keys.py  theme.py  activity.py  preview.py
+maba.cmd   MABA.md   pyproject.toml
 ```
