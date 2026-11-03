@@ -57,7 +57,29 @@ aws configure --profile agung        # access key + region, mis. ap-southeast-1
 aws configure sso --profile agung    # atau lewat SSO
 ```
 
-Profile lain: `--profile NAMA`, env `MABA_PROFILE`, atau `"profile"` di `~/.maba/settings.json`.
+#### Mengganti profile AWS (`--profile`)
+
+Default-nya `agung`. Pilih profile lain lewat salah satu cara berikut; yang lebih bawah **menimpa** yang di atasnya:
+
+| Prioritas | Cara | Cakupan |
+|---|---|---|
+| 1 (terendah) | `"profile": "kantor"` di `~/.maba/settings.json` | permanen |
+| 2 | env `MABA_PROFILE` | sesi terminal (`$env:MABA_PROFILE="kantor"` · `export MABA_PROFILE=kantor`) atau permanen (`setx MABA_PROFILE kantor`, buka ulang terminal) |
+| 3 (tertinggi) | `maba --profile kantor` | sekali jalan |
+
+```bash
+maba --profile kantor --doctor    # uji dulu: profile → kredensial → STS → model
+maba --profile kantor -c          # pakai profile baru dan lanjutkan sesi terakhir
+```
+
+- **Dibaca saat start.** Tidak ada `/profile`: untuk berganti, keluar lalu jalankan `maba` lagi (riwayat aman lewat `-c`).
+- **Berlaku untuk semua panggilan Bedrock**, termasuk sub-agen, `web_fetch`, dan kompaksi (selalu GPT-6 Luna). Karena itu
+  profile tetap diperlukan walau agen utama memakai model `api-*`.
+- **Region** mengikuti profile; timpa dengan `--region` atau env `MABA_REGION` bila perlu.
+- **Settings proyek tidak berlaku:** `"profile"` di `.maba/settings*.json` diabaikan dengan peringatan.
+- **Cek yang aktif:** banner awal, `/model` (tanpa argumen), atau `/config`.
+- **Error umum:** *"Profile AWS 'x' tidak ditemukan"* → `aws configure list-profiles`; kredensial SSO kedaluwarsa →
+  `aws sso login --profile x`.
 
 **Anthropic (opsional, untuk model `api-*`).** Simpan di environment pengguna, jangan di file proyek atau settings:
 
